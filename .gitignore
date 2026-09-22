@@ -1,0 +1,6 @@
+.tools/
+**/bin/
+**/obj/
+**/build/
+firmware/sdkconfig
+.vs/
