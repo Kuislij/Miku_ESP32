@@ -31,6 +31,13 @@ public sealed class FfmpegDecoder
         var filter = $"fps={fps},scale={width}:{pixelHeight}:force_original_aspect_ratio=decrease,pad={width}:{pixelHeight}:(ow-iw)/2:(oh-ih)/2,scale={width}:{height}";
         foreach (var arg in new[] { "-nostdin", "-hide_banner", "-loglevel", "error", "-i", file, "-an", "-vf", filter, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1" }) start.ArgumentList.Add(arg);
         using var process = Process.Start(start) ?? throw new IOException("Could not start FFmpeg");
+        // Closing the application may stop the UI synchronization context before the async iterator resumes.
+        // Cancel the native process directly as well as cancelling the stream read.
+        using var terminate = cancellation.Register(() =>
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        });
         var errors = new Queue<string>();
         var drain = Task.Run(async () => { while (await process.StandardError.ReadLineAsync() is { } line) { if (errors.Count == 8) errors.Dequeue(); errors.Enqueue(line[..Math.Min(line.Length, 512)]); } });
         long frameNumber = 0;

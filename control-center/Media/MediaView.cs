@@ -94,6 +94,7 @@ public sealed class MediaView : UserControl
         try { await stream.MoveNextAsync(); throw new IOException("Decoder ignored cancellation"); }
         catch (OperationCanceledException) { }
     }
+    internal void StartShutdownTest(string path) { file = path; Start(true); }
     protected override void Dispose(bool disposing)
     {
         if (disposing) { disposed = true; cancellation?.Cancel(); audio?.Stop(); audio?.Dispose(); vlc?.Dispose(); cancellation?.Dispose(); }

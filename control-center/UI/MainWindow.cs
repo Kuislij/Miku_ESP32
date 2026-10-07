@@ -161,6 +161,7 @@ public sealed class MainWindow : Form
             Send("stop demo"); await AwaitReady(() => session.Pending == 0 && services.Text.Split('\n').Any(line => line.StartsWith("demo") && line.Contains("Stopped"))); SelectPage(0);
             using var bitmap = new Bitmap(Width, Height); DrawToBitmap(bitmap, new Rectangle(0, 0, Width, Height)); bitmap.Save(Path.Combine(AppContext.BaseDirectory, "dashboard.png"));
             File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), $"PASS: {(initialPort ?? "Simulator")}, telemetry, tasks, commands, service state, media event, rendering" + (videoFile != null ? ", video frame rendering, ASCII decoding and cancellation" : ""));
+            if (videoFile != null) { media.StartShutdownTest(videoFile); await Task.Delay(150); }
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "FAIL: " + e); Environment.ExitCode = 1; }
         finally { Close(); }
