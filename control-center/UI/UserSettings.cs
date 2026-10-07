@@ -1,6 +1,6 @@
 using System.Text.Json;
 namespace MikuOS.ControlCenter.UI;
-internal sealed record UserSettings(string Mode = "Simulator", string Port = "COM5")
+internal sealed record UserSettings(string Mode = "Автоматически", string Port = "", bool BootAnimation = true)
 {
     private static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MikuOS", "settings.json");
     public static UserSettings Load()

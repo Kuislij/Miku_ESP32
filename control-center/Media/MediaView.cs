@@ -5,7 +5,7 @@ namespace MikuOS.ControlCenter.Media;
 public sealed class MediaView : UserControl
 {
     private readonly VideoCanvas video = new();
-    private readonly Label status = new() { Dock = DockStyle.Bottom, Height = 48, Padding = new(12), Text = "Open a local video. ASCII playback appears in Terminal." };
+    private readonly Label status = new() { Dock = DockStyle.Bottom, Height = 48, Padding = new(12), Text = "Открой видео с компьютера. ASCII-видео появится в терминале.", ForeColor = UI.Theme.Muted };
     private readonly ComboBox color = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
     private LibVLC? vlc;
     private MediaPlayer? audio;
@@ -23,10 +23,10 @@ public sealed class MediaView : UserControl
     public MediaView()
     {
         Dock = DockStyle.Fill;
-        var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 56, Padding = new(10) };
+        var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 95, Padding = new(6) };
         void Button(string text, Action action) { var b = UI.Theme.Button(text); b.Click += (_, _) => action(); bar.Controls.Add(b); }
-        Button("Open video", Open); Button("Play", () => Start(false)); Button("Pause / Resume", Pause); Button("Stop", StopPlayback); Button("ASCII → Terminal", () => Start(true));
-        color.Items.AddRange(["True color", "256 colors", "Mono cyan"]); color.SelectedIndex = 0; bar.Controls.Add(color); Button("Export ANSI", ExportAnsi);
+        Button("Открыть видео", Open); Button("▶ Играть", () => Start(false)); Button("Пауза / Продолжить", Pause); Button("Стоп", StopPlayback); Button("ASCII → Терминал", () => Start(true));
+        color.Items.AddRange(["Все цвета", "256 цветов", "Монохром"]); color.SelectedIndex = 0; bar.Controls.Add(color); Button("Сохранить ANSI", ExportAnsi);
         Controls.Add(video); Controls.Add(status); Controls.Add(bar);
     }
     private void Open()
@@ -63,18 +63,18 @@ public sealed class MediaView : UserControl
                 await foreach (var frame in new FfmpegDecoder().Decode(path, 96, 30, token, timing))
                 { if (disposed) break; lastFrame = frame; AsciiReady?.Invoke(frame, Mode); status.Text = $"ASCII / 96×30 / 10 FPS / frame {++count} / {Path.GetFileName(path)}"; }
             }
-            if (!disposed && !token.IsCancellationRequested) status.Text = "Playback complete";
+            if (!disposed && !token.IsCancellationRequested) status.Text = "Воспроизведение завершено";
         }
         catch (OperationCanceledException) { }
-        catch (Exception e) { playbackError = e; if (!disposed) status.Text = "Playback failed: " + e.Message; }
+        catch (Exception e) { playbackError = e; if (!disposed) status.Text = "Ошибка воспроизведения: " + e.Message; }
         finally { if (!disposed) { audio?.Stop(); if (ascii) AsciiStopped?.Invoke(); } }
     }
-    private void Pause() { if (clock is null) return; clock.Toggle(); audio?.SetPause(clock.Paused); status.Text = clock.Paused ? "Paused" : "Playing"; }
+    private void Pause() { if (clock is null) return; clock.Toggle(); audio?.SetPause(clock.Paused); status.Text = clock.Paused ? "Пауза" : "Воспроизведение"; }
     public void StopPlayback() { generation++; CancelPlayback(); }
-    private void CancelPlayback() { cancellation?.Cancel(); audio?.Stop(); AsciiStopped?.Invoke(); if (!disposed) status.Text = "Stopped"; }
+    private void CancelPlayback() { cancellation?.Cancel(); audio?.Stop(); AsciiStopped?.Invoke(); if (!disposed) status.Text = "Остановлено"; }
     private void ExportAnsi()
     {
-        if (lastFrame is null) { status.Text = "Play ASCII video before exporting a frame"; return; }
+        if (lastFrame is null) { status.Text = "Сначала запусти ASCII-видео"; return; }
         using var dialog = new SaveFileDialog { Filter = "ANSI frame|*.ans", FileName = "miku-frame.ans" };
         if (dialog.ShowDialog(this) == DialogResult.OK) File.WriteAllText(dialog.FileName, lastFrame.ToAnsi(Mode));
     }

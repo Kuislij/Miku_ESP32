@@ -3,7 +3,7 @@ public sealed class TerminalView : UserControl
 {
     private readonly Media.AsciiCanvas video = new();
     private readonly Panel videoArea = new() { Dock = DockStyle.Top, Height = 390, Visible = false };
-    private readonly CheckBox follow = new() { Text = "Auto-scroll", Checked = true, AutoSize = true, ForeColor = Color.Silver };
+    private readonly CheckBox follow = new() { Text = "Автопрокрутка", Checked = true, AutoSize = true, ForeColor = UI.Theme.Muted, Padding = new(8, 4, 0, 0) };
     private readonly RichTextBox output = new() { Dock = DockStyle.Fill, ReadOnly = true, BorderStyle = BorderStyle.None, BackColor = Color.FromArgb(9, 16, 24), ForeColor = Color.Gainsboro, Font = new Font("Consolas", 11) };
     private readonly TextBox input = new() { Dock = DockStyle.Fill, MaxLength = 1024, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.FromArgb(20, 32, 44), ForeColor = Color.Turquoise, Font = new Font("Consolas", 11) };
     private readonly List<string> history = new();
@@ -16,10 +16,10 @@ public sealed class TerminalView : UserControl
         var bar = new Panel { Dock = DockStyle.Bottom, Height = 38, Padding = new Padding(4) };
         bar.Controls.Add(input); bar.Controls.Add(new Label { Text = "miku@esp32:~$", Dock = DockStyle.Left, Width = 150, ForeColor = Color.Turquoise, TextAlign = ContentAlignment.MiddleLeft });
         var videoTools = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 34 };
-        var stop = UI.Theme.Button("Stop ASCII"); stop.Click += (_, _) => VideoStopRequested?.Invoke(); videoTools.Controls.Add(stop);
+        var stop = UI.Theme.Button("Остановить ASCII"); stop.Click += (_, _) => VideoStopRequested?.Invoke(); videoTools.Controls.Add(stop);
         videoArea.Controls.Add(video); videoArea.Controls.Add(videoTools);
         var tools = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 38, Padding = new(4) };
-        var clear = UI.Theme.Button("Clear view"); clear.Click += (_, _) => ClearOutput(); tools.Controls.Add(clear); tools.Controls.Add(follow);
+        var clear = UI.Theme.Button("Очистить"); clear.Click += (_, _) => ClearOutput(); tools.Controls.Add(clear); tools.Controls.Add(follow);
         Controls.Add(output); Controls.Add(videoArea); Controls.Add(tools); Controls.Add(bar);
         input.KeyDown += (_, e) =>
         {

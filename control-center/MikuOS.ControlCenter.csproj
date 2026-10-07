@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms><PlatformTarget>x64</PlatformTarget></PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Assets/*.png"/>
     <ProjectReference Include="../shared/MikuOS.Core.csproj"/>
     <PackageReference Include="System.IO.Ports" Version="8.0.0"/>
     <PackageReference Include="LibVLCSharp" Version="3.10.1"/>

@@ -35,4 +35,37 @@ var monochrome = MikuOS.Media.AsciiFrame.FromRgb(2, 1, [0, 0, 0, 255, 255, 255])
 Check(monochrome.Text == " @\n", "ASCII luminance extremes");
 Check(monochrome.ToAnsi(MikuOS.Media.AsciiColorMode.TrueColor).Contains("\u001b[38;2;255;255;255m@"), "ANSI true color encoding");
 Check(monochrome.ToAnsi(MikuOS.Media.AsciiColorMode.Color256).Contains("\u001b[38;5;231m@"), "ANSI 256 palette encoding");
+var probes = new List<ProbeTransport>();
+MikuOS.Transport.ITransport Probe(string name) { var probe = new ProbeTransport(name); probes.Add(probe); return probe; }
+var discoveryTimeout = TimeSpan.FromMilliseconds(25);
+var discovered = await MikuOS.Transport.DeviceDiscovery.FindAsync(["busy", "unrelated", "wrong-id", "valid", "never-open"], Probe, discoveryTimeout);
+Check(discovered == "valid" && probes.Count == 4 && probes.All(p => p.Disposed), "discovery skips busy/unrelated ports, requires correlated pong, and releases every port");
+Check(await MikuOS.Transport.DeviceDiscovery.FindAsync(["silent", "bad-json", "pong-only"], Probe, discoveryTimeout) == null, "discovery times out without accepting noise or pong alone");
+Check(await MikuOS.Transport.DeviceDiscovery.FindAsync([], Probe, discoveryTimeout) == null, "discovery with no attached ports");
+using (var discoveryCancel = new CancellationTokenSource())
+{
+    discoveryCancel.CancelAfter(20);
+    try { await MikuOS.Transport.DeviceDiscovery.FindAsync(["silent"], Probe, TimeSpan.FromSeconds(3), discoveryCancel.Token); throw new Exception("discovery ignored cancellation"); }
+    catch (OperationCanceledException) { Check(probes[^1].Disposed, "discovery cancellation releases transport promptly"); }
+}
 Console.WriteLine($"{checks} checks passed");
+
+sealed class ProbeTransport(string behavior) : MikuOS.Transport.ITransport
+{
+    public event Action<string>? Received;
+    public event Action<string>? Faulted { add { } remove { } }
+    public bool Connected { get; private set; }
+    public bool Disposed { get; private set; }
+    public void Connect() { if (behavior == "busy") throw new IOException("busy"); Connected = true; }
+    public void Send(string wire)
+    {
+        var command = Frame.Parse(wire.TrimEnd('\r', '\n'));
+        if (behavior == "silent") return;
+        string response = command.Payload == "ping" ? new Frame("RES", behavior == "wrong-id" ? command.Id - 1 : command.Id, "pong").Encode() :
+            behavior == "pong-only" ? "noise\n" : new Frame("STAT", 0, behavior == "bad-json" ? "[]" :
+                "{\"model\":\"" + (behavior == "unrelated" ? "OtherDevice" : "ESP32-S3 N16R8") + "\",\"firmware\":\"0.2.0\",\"services\":{\"telemetry\":true}}").Encode();
+        Received?.Invoke(response[..(response.Length / 2)]); Received?.Invoke(response[(response.Length / 2)..]);
+    }
+    public void Disconnect() => Connected = false;
+    public void Dispose() { Disposed = true; Disconnect(); }
+}

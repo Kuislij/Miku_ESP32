@@ -11,10 +11,10 @@ using MikuOS.ControlCenter.Media;
 namespace MikuOS.ControlCenter.UI;
 public sealed class MainWindow : Form
 {
-    private readonly ComboBox mode = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 140 };
+    private readonly ComboBox mode = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 205 };
     private readonly ComboBox port = new() { DropDownStyle = ComboBoxStyle.DropDown, Width = 100 };
-    private readonly Button connect = Theme.Button("Connect");
-    private readonly Label status = new() { AutoSize = true, Padding = new(14, 9, 0, 0), ForeColor = Theme.Accent };
+    private readonly Button connect = Theme.Button("Подключить");
+    private readonly Label status = new() { Dock = DockStyle.Fill, Padding = new(8, 7, 0, 0), ForeColor = Theme.Accent };
     private readonly Panel content = new() { Dock = DockStyle.Fill };
     private readonly List<Control> pages = new();
     private readonly List<Button> navigation = new();
@@ -22,94 +22,136 @@ public sealed class MainWindow : Form
     private readonly DashboardView dashboard = new();
     private readonly SystemMonitorView monitor = new();
     private readonly MediaView media = new();
-    private readonly RichTextBox logs = new() { Dock = DockStyle.Fill, ReadOnly = true, BackColor = Theme.Background, ForeColor = Color.Silver, BorderStyle = BorderStyle.None, Font = new Font("Consolas", 10) };
-    private readonly ListView tasks = new() { Dock = DockStyle.Fill, View = View.Details, BackColor = Theme.Background, ForeColor = Color.Gainsboro, FullRowSelect = true, BorderStyle = BorderStyle.None };
-    private readonly Label services = new() { Dock = DockStyle.Fill, Font = new Font("Consolas", 13), Padding = new(20) };
+    private readonly RichTextBox logs = new() { Dock = DockStyle.Fill, ReadOnly = true, BackColor = Theme.Surface, ForeColor = Theme.Ink, BorderStyle = BorderStyle.None, Font = new Font("Consolas", 10) };
+    private readonly ListView tasks = new() { Dock = DockStyle.Fill, View = View.Details, BackColor = Theme.Surface, ForeColor = Theme.Ink, FullRowSelect = true, BorderStyle = BorderStyle.None };
+    private readonly Label services = new() { Dock = DockStyle.Fill, Font = new Font("Consolas", 13), Padding = new(20), ForeColor = Theme.Ink };
     private readonly DeviceSession session = new();
     private readonly HashSet<uint> silentReplies = new();
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 1000 };
     private int selected;
-    private bool autoReconnect, closing, testing, asciiActive;
-    private DateTime nextRetry, lastTaskPoll;
+    private bool autoReconnect, closing, testing, asciiActive, discovering;
+    private DateTime nextRetry, lastTaskPoll, connectedAt;
     private int connectionGeneration;
     private readonly string? initialPort;
-    public MainWindow(string? serialPort = null, bool smoke = false)
+    private readonly CancellationTokenSource lifetime = new();
+    private CancellationTokenSource? discoveryCancellation;
+    private readonly BootOverlay boot = new();
+    private readonly CheckBox bootEnabled = new() { Text = "Показывать Miku при запуске", AutoSize = true, Checked = true };
+    public MainWindow(string? serialPort = null, bool smoke = false, bool simulator = false, bool automatic = false)
     {
         initialPort = serialPort; testing = smoke;
-        Text = "MikuOS / Control Center"; Size = new(1280, 850); MinimumSize = new(1050, 700); StartPosition = FormStartPosition.CenterScreen;
-        BackColor = Theme.Background; ForeColor = Color.Gainsboro; Font = new Font("Segoe UI", 10);
-        var sidebar = new Panel { Dock = DockStyle.Left, Width = 190, BackColor = Theme.Surface, Padding = new(12, 20, 12, 12) };
-        var brand = new Panel { Dock = DockStyle.Top, Height = 100 };
-        brand.Controls.Add(new Label { Text = "MIKU / OS", Dock = DockStyle.Top, Height = 42, ForeColor = Theme.Accent, Font = new Font("Segoe UI", 16, FontStyle.Bold) });
-        brand.Controls.Add(new Label { Text = "CONTROL CENTER", Dock = DockStyle.Bottom, Height = 50, ForeColor = Theme.Muted, Font = new Font("Segoe UI", 9) });
-        var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-        sidebar.Controls.Add(nav); sidebar.Controls.Add(brand);
-        var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 66, Padding = new(20, 15, 0, 0) };
-        mode.Items.AddRange(["Simulator", "Real Device"]);
+        Text = "MikuOS"; Size = new(1280, 890); MinimumSize = new(1120, 820); StartPosition = FormStartPosition.CenterScreen;
+        BackColor = Theme.Background; ForeColor = Theme.Ink; Font = new Font("Segoe UI", 10); Padding = new(25, 12, 25, 22); DoubleBuffered = true;
+        var header = new Panel { Dock = DockStyle.Top, Height = 66 };
+        var brand = new Label { Text = "MikuOS", Dock = DockStyle.Left, Width = 180, ForeColor = Theme.Accent, Font = new Font("Segoe UI", 21, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
+        var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true, Padding = new(0, 13, 0, 0) };
+        header.Controls.Add(nav); header.Controls.Add(brand);
+        var bar = new Panel { Dock = DockStyle.Top, Height = 54, Padding = new(0, 4, 3, 10) };
+        connect.Dock = DockStyle.Right; connect.Width = 140; connect.BackColor = Theme.Pale; connect.ForeColor = Theme.Accent;
+        bar.Controls.Add(status); bar.Controls.Add(connect);
+        mode.Items.AddRange(["Автоматически", "Демонстрация", "Порт вручную"]);
         var saved = UserSettings.Load(); RefreshPorts();
         port.Text = initialPort ?? saved.Port;
-        mode.SelectedIndex = initialPort != null ? 1 : smoke ? 0 : saved.Mode == "Real Device" ? 1 : 0;
-        mode.SelectedIndexChanged += (_, _) => port.Enabled = mode.SelectedIndex == 1;
-        port.Enabled = mode.SelectedIndex == 1;
-        var refresh = Theme.Button("↻ Ports"); refresh.Click += (_, _) => RefreshPorts();
-        bar.Controls.AddRange([mode, port, refresh, connect, status]);
+        mode.SelectedIndex = initialPort != null ? 2 : simulator ? 1 : automatic ? 0 : saved.Mode == "Демонстрация" ? 1 : saved.Mode == "Порт вручную" ? 2 : 0;
+        mode.SelectedIndexChanged += (_, _) => port.Enabled = mode.SelectedIndex == 2;
+        port.Enabled = mode.SelectedIndex == 2; bootEnabled.Checked = saved.BootAnimation || testing;
         void Add(string title, Control page)
         {
             int index = pages.Count; page.Dock = DockStyle.Fill; page.Visible = false; content.Controls.Add(page); pages.Add(page);
-            var button = Theme.Button(title); button.AutoSize = false; button.Width = 164; button.Height = 44; button.Margin = new(0, 3, 0, 3); button.TextAlign = ContentAlignment.MiddleLeft; button.FlatAppearance.BorderSize = 0;
+            var button = Theme.Button(title); button.MinimumSize = new(0, 37); button.Margin = new(2, 0, 2, 0); button.Padding = new(13, 4, 13, 4); button.Font = new Font("Segoe UI", 9, FontStyle.Bold);
             button.Click += (_, _) => SelectPage(index); nav.Controls.Add(button); navigation.Add(button);
         }
-        tasks.Columns.Add("ID", 65); tasks.Columns.Add("Task", 210); tasks.Columns.Add("State", 150); tasks.Columns.Add("Runs", 100); tasks.Columns.Add("Period ms", 120);
-        Add("Dashboard", dashboard); Add("Terminal", terminal); Add("Tasks", tasks);
+        tasks.Columns.Add("ID", 65); tasks.Columns.Add("Задача", 210); tasks.Columns.Add("Состояние", 180); tasks.Columns.Add("Запуски", 100); tasks.Columns.Add("Период, мс", 140);
+        Add("Главная", dashboard); Add("Терминал", terminal); Add("Задачи", CardPage(tasks));
         var servicePanel = new Panel(); var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 64, Padding = new(20, 10, 0, 0) };
         foreach (var name in new[] { "telemetry", "heartbeat", "demo" }) foreach (var verb in new[] { "start", "stop" })
         { var command = verb + " " + name; var b = Theme.Button(command); b.Click += (_, _) => Send(command); buttons.Controls.Add(b); }
-        servicePanel.Controls.Add(services); servicePanel.Controls.Add(buttons); Add("Services", servicePanel); Add("System Monitor", monitor);
+        servicePanel.Controls.Add(services); servicePanel.Controls.Add(buttons); Add("Сервисы", CardPage(servicePanel)); Add("Мониторинг", CardPage(monitor));
         var logPanel = new Panel(); var logButtons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 50 };
-        var exportLogs = Theme.Button("Export logs"); exportLogs.Click += (_, _) => { using var d = new SaveFileDialog { Filter = "Text|*.txt", FileName = "miku-logs.txt" }; if (d.ShowDialog(this) == DialogResult.OK) logs.SaveFile(d.FileName, RichTextBoxStreamType.PlainText); };
-        var readLogs = Theme.Button("Read device journal"); readLogs.Click += (_, _) => { SelectPage(1); Send("logs"); };
-        logButtons.Controls.AddRange([exportLogs, readLogs]); logPanel.Controls.Add(logs); logPanel.Controls.Add(logButtons); Add("Logs", logPanel); Add("Media", media); Add("Settings", Settings());
-        Controls.Add(content); Controls.Add(bar); Controls.Add(sidebar); SelectPage(0);
+        var exportLogs = Theme.Button("Сохранить журнал"); exportLogs.Click += (_, _) => { using var d = new SaveFileDialog { Filter = "Text|*.txt", FileName = "miku-logs.txt" }; if (d.ShowDialog(this) == DialogResult.OK) logs.SaveFile(d.FileName, RichTextBoxStreamType.PlainText); };
+        var readLogs = Theme.Button("Прочитать журнал платы"); readLogs.Click += (_, _) => { SelectPage(1); Send("logs"); };
+        logButtons.Controls.AddRange([exportLogs, readLogs]); logPanel.Controls.Add(logs); logPanel.Controls.Add(logButtons); Add("Журнал", CardPage(logPanel)); Add("Медиа", CardPage(media)); Add("Настройки", CardPage(Settings()));
+        Controls.Add(content); Controls.Add(bar); Controls.Add(header); Controls.Add(boot); boot.BringToFront(); boot.Visible = bootEnabled.Checked; SelectPage(0);
+        dashboard.ActionRequested += SelectPage;
         media.AsciiReady += (frame, color) => { if (!asciiActive) { asciiActive = true; SelectPage(1); } terminal.ShowVideo(frame, color); };
         media.AsciiStopped += () => { asciiActive = false; terminal.HideVideo(); };
         terminal.VideoStopRequested += media.StopPlayback;
-        connect.Click += (_, _) => { if (session.Connected || autoReconnect) { autoReconnect = false; Disconnect(); } else Connect(); };
+        connect.Click += (_, _) => { if (session.Connected || autoReconnect || discovering) { autoReconnect = false; Disconnect(); } else BeginConnection(); };
         terminal.Command += Send;
         session.FrameReceived += frame => { int receivedGeneration = connectionGeneration; Post(() => { if (receivedGeneration == connectionGeneration) HandleFrame(frame); }); };
         session.Error += message => Post(() => terminal.Write(message, Color.Salmon));
         timer.Tick += (_, _) => Tick(); timer.Start();
-        Shown += (_, _) => Connect();
-        FormClosing += (_, _) => { closing = true; timer.Stop(); autoReconnect = false; session.Dispose(); timer.Dispose(); };
+        Shown += (_, _) => BeginConnection();
+        FormClosing += (_, _) => { closing = true; lifetime.Cancel(); discoveryCancellation?.Cancel(); timer.Stop(); autoReconnect = false; session.Dispose(); timer.Dispose(); };
     }
+    private static Control CardPage(Control page) { var panel = new SoftPanel { Dock = DockStyle.Fill, Padding = new(22) }; panel.Controls.Add(page); page.Dock = DockStyle.Fill; return panel; }
     private Control Settings()
     {
         var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, Padding = new(30), WrapContents = false };
-        panel.Controls.Add(Theme.Label("DEVICE SETTINGS", 18));
-        panel.Controls.Add(new Label { AutoSize = true, Text = "USB-UART · 115200 baud · Protocol v1\nESP32-S3 N16R8 · Firmware 0.2\nDevice configuration is stored in NVS.\nCPU load will appear after a validated measurement provider is added.", Padding = new(0, 15, 0, 15) });
+        panel.AutoScroll = true;
+        panel.Controls.Add(Theme.Label("Подключение и запуск", 20));
+        panel.Controls.Add(new Label { AutoSize = true, Text = "Подключи плату к USB-UART и запусти MikuOS.\nВ автоматическом режиме порт определяется сам.\nДемонстрация работает без платы и показывает тестовые данные.", Padding = new(0, 12, 0, 12) });
+        var connectionTools = new FlowLayoutPanel { AutoSize = true, Width = 750, Height = 48 };
+        var refresh = Theme.Button("Обновить порты"); refresh.Click += (_, _) => RefreshPorts();
+        var applyConnection = Theme.Button("Применить"); applyConnection.BackColor = Theme.Pale; applyConnection.Click += (_, _) => { autoReconnect = false; Disconnect(); BeginConnection(); };
+        connectionTools.Controls.AddRange([mode, port, refresh, applyConnection]); panel.Controls.Add(connectionTools);
+        panel.Controls.Add(bootEnabled); bootEnabled.CheckedChanged += (_, _) => SavePreferences();
+        panel.Controls.Add(new Label { Text = "Настройки устройства", Font = new Font("Segoe UI", 18, FontStyle.Bold), AutoSize = true, Padding = new(0, 22, 0, 12) });
+        panel.Controls.Add(new Label { AutoSize = true, Text = "Интервал телеметрии (мс) · сохраняется на плате", Padding = new(0, 0, 0, 8) });
         var interval = new NumericUpDown { Minimum = 200, Maximum = 10000, Increment = 100, Value = 1000, Width = 160 };
-        panel.Controls.Add(Theme.Label("Telemetry interval, milliseconds")); panel.Controls.Add(interval);
-        var apply = Theme.Button("Save interval on device"); apply.Click += (_, _) => Send($"config telemetry_ms {interval.Value}"); panel.Controls.Add(apply);
-        var config = Theme.Button("Read device configuration"); config.Click += (_, _) => { SelectPage(1); Send("config"); }; panel.Controls.Add(config);
-        var reboot = Theme.Button("Restart MikuOS"); reboot.Click += (_, _) => Send("reboot"); panel.Controls.Add(reboot);
+        panel.Controls.Add(interval);
+        var apply = Theme.Button("Сохранить на плате"); apply.Click += (_, _) => Send($"config telemetry_ms {interval.Value}"); panel.Controls.Add(apply);
+        var config = Theme.Button("Прочитать настройки платы"); config.Click += (_, _) => { SelectPage(1); Send("config"); }; panel.Controls.Add(config);
+        var reboot = Theme.Button("Перезапустить MikuOS"); reboot.Click += (_, _) => Send("reboot"); panel.Controls.Add(reboot);
         return panel;
     }
     private void RefreshPorts() { var current = port.Text; port.Items.Clear(); port.Items.AddRange(SerialPort.GetPortNames().Order().Cast<object>().ToArray()); if (current.Length > 0) port.Text = current; else if (port.Items.Count > 0) port.SelectedIndex = 0; }
-    private void SelectPage(int index) { pages[selected].Visible = false; selected = index; pages[index].Visible = true; pages[index].BringToFront(); for (int i = 0; i < navigation.Count; i++) { navigation[i].BackColor = i == index ? Color.FromArgb(27, 65, 72) : Theme.Surface; navigation[i].ForeColor = i == index ? Theme.Accent : Color.Gainsboro; } }
+    private void SelectPage(int index) { pages[selected].Visible = false; selected = index; pages[index].Visible = true; pages[index].BringToFront(); for (int i = 0; i < navigation.Count; i++) { navigation[i].BackColor = i == index ? Theme.Pale : Theme.Background; navigation[i].ForeColor = i == index ? Theme.Accent : Theme.Ink; } }
+    private void SavePreferences()
+    {
+        if (testing) return;
+        try { new UserSettings(mode.Text, port.Text.Trim(), bootEnabled.Checked).Save(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { terminal.Write("Не удалось сохранить настройки: " + e.Message, Color.Salmon); }
+    }
+    private void BeginConnection()
+    {
+        autoReconnect = mode.SelectedIndex != 1;
+        if (mode.SelectedIndex == 0) { mode.Enabled = port.Enabled = false; connect.Text = "Остановить поиск"; _ = Discover(); }
+        else Connect();
+    }
+    private async Task Discover()
+    {
+        if (discovering || closing || !autoReconnect) return;
+        discovering = true; discoveryCancellation?.Dispose(); discoveryCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        var token = discoveryCancellation.Token;
+        try
+        {
+            status.Text = "●  Ищем плату MikuOS…"; dashboard.SetConnection("Подключи плату — я найду её автоматически.");
+            var available = SerialPort.GetPortNames().OrderBy(p => p.Equals(port.Text, StringComparison.OrdinalIgnoreCase) ? 0 : 1).ThenBy(p => p).ToArray();
+            var found = await DeviceDiscovery.FindAsync(available, p => new SerialTransport(p), TimeSpan.FromMilliseconds(1400), token);
+            if (closing || token.IsCancellationRequested || !autoReconnect) return;
+            if (found != null) { port.Text = found; Connect(); }
+            else { status.Text = "●  Ожидаем ESP32 · подключи USB-UART кабелем с передачей данных"; boot.ConnectionText = "Ждём твою ESP32…"; }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { terminal.Write("Поиск платы: " + e.Message, Color.Salmon); }
+        finally { discovering = false; nextRetry = DateTime.UtcNow.AddSeconds(3); }
+    }
     private void Connect()
     {
         connectionGeneration++;
         try
         {
-            session.Connect(mode.SelectedIndex == 0 ? new SimulatorTransport() : new SerialTransport(port.Text.Trim()));
-            autoReconnect = mode.SelectedIndex == 1; connect.Text = "Disconnect"; mode.Enabled = port.Enabled = false;
+            session.Connect(mode.SelectedIndex == 1 ? new SimulatorTransport() : new SerialTransport(port.Text.Trim())); connectedAt = DateTime.UtcNow;
+            autoReconnect = mode.SelectedIndex != 1; connect.Text = "Отключить"; mode.Enabled = port.Enabled = false;
             dashboard.Reset(); monitor.Reset(); tasks.Items.Clear(); services.Text = "Waiting for service snapshot…";
             silentReplies.Clear(); Send("ping", true); Send("info", true); Send("tasks", true);
-            if (!testing) try { new UserSettings(mode.Text, port.Text.Trim()).Save(); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { terminal.Write("Could not save connection preferences: " + e.Message, Color.Salmon); }
+            boot.ConnectionText = mode.SelectedIndex == 1 ? "Демонстрация готова!" : "Подключаемся к ESP32…";
+            SavePreferences();
         }
-        catch (Exception e) { terminal.Write("Connection failed: " + e.Message, Color.Salmon); session.Disconnect(); if (!autoReconnect) { mode.Enabled = true; port.Enabled = mode.SelectedIndex == 1; } nextRetry = DateTime.UtcNow.AddSeconds(3); }
-        Tick();
+        catch (Exception e) { terminal.Write("Не удалось подключиться: " + e.Message, Color.Salmon); session.Disconnect(); if (!autoReconnect) { mode.Enabled = true; port.Enabled = mode.SelectedIndex == 2; } nextRetry = DateTime.UtcNow.AddSeconds(3); }
     }
-    private void Disconnect() { connectionGeneration++; session.Disconnect(); connect.Text = "Connect"; mode.Enabled = true; port.Enabled = mode.SelectedIndex == 1; status.Text = "OFFLINE"; }
+    private void Disconnect() { discoveryCancellation?.Cancel(); connectionGeneration++; session.Disconnect(); connect.Text = "Подключить"; mode.Enabled = true; port.Enabled = mode.SelectedIndex == 2; status.Text = "●  Не подключено"; dashboard.Reset(); monitor.Reset(); tasks.Items.Clear(); services.Text = "Нет подключения"; }
     private void Post(Action action) { if (closing || IsDisposed || !IsHandleCreated) return; try { BeginInvoke((Action)(() => { if (!closing) action(); })); } catch (InvalidOperationException) { } }
     private void Send(string command) => Send(command, false);
     private void Send(string command, bool quiet)
@@ -135,20 +177,31 @@ public sealed class MainWindow : Form
     private void Tick()
     {
         if (closing) return; session.ExpireRequests(); if (silentReplies.Count > 128) silentReplies.Clear(); var now = DateTime.UtcNow;
-        if (autoReconnect && session.Connected && !SerialPort.GetPortNames().Contains(port.Text, StringComparer.OrdinalIgnoreCase)) { session.Disconnect(); nextRetry = now.AddSeconds(2); }
-        if (autoReconnect && !session.Connected && now >= nextRetry) { nextRetry = now.AddSeconds(3); Connect(); return; }
+        if (autoReconnect && session.Connected && (!SerialPort.GetPortNames().Contains(port.Text, StringComparer.OrdinalIgnoreCase) || now - (session.LastFrame == DateTime.MinValue ? connectedAt : session.LastFrame) > TimeSpan.FromSeconds(15))) { connectionGeneration++; session.Disconnect(); dashboard.Reset(); monitor.Reset(); tasks.Items.Clear(); services.Text = "Ждём повторное подключение"; nextRetry = now.AddSeconds(2); }
+        if (autoReconnect && !session.Connected && now >= nextRetry && !discovering) { nextRetry = now.AddSeconds(3); if (mode.SelectedIndex == 0) _ = Discover(); else Connect(); return; }
         if (session.Connected)
         {
             var age = now - session.LastFrame;
-            status.Text = $"{(age < TimeSpan.FromSeconds(5) ? "ONLINE" : session.LastFrame == DateTime.MinValue ? "CONNECTING" : "STALE")}  /  RX {session.Rx:N0}  TX {session.Tx:N0}  /  rejected {session.Rejected}";
+            bool live = age < TimeSpan.FromSeconds(5);
+            status.Text = $"●  {(mode.SelectedIndex == 1 ? "Демонстрация · тестовые данные" : live ? "Плата подключена · " + port.Text + "   /   Всё готово к работе" : "Ждём ответ платы · " + port.Text)}";
+            dashboard.SetConnection(mode.SelectedIndex == 1 ? "Демонстрационный режим · данные симулятора" : live ? "Всё готово. Твоя ESP32 подключена." : "Подключение есть, ожидаем данные платы…");
+            boot.ConnectionText = mode.SelectedIndex == 1 ? "Демонстрация готова!" : live ? "ESP32 подключена. Поехали!" : "Подключаемся к ESP32…";
             if (now - lastTaskPoll > TimeSpan.FromSeconds(3)) { lastTaskPoll = now; Send("tasks", true); if (age > TimeSpan.FromSeconds(5)) Send("info", true); }
         }
-        else status.Text = autoReconnect ? "RECONNECTING…" : "OFFLINE";
+        else if (!autoReconnect) status.Text = "●  Не подключено";
     }
     internal async Task SmokeTest(string? videoFile = null)
     {
         try
         {
+            if (boot.Visible)
+            {
+                await Task.Delay(450); using var splash = new Bitmap(boot.Width, boot.Height); boot.DrawToBitmap(splash, boot.ClientRectangle); splash.Save(Path.Combine(AppContext.BaseDirectory, "boot-animation.png"));
+                await Task.Delay(330); using var nextFrame = new Bitmap(boot.Width, boot.Height); boot.DrawToBitmap(nextFrame, boot.ClientRectangle); nextFrame.Save(Path.Combine(AppContext.BaseDirectory, "boot-animation-next.png"));
+                int changedPixels = 0, cx = boot.Width / 2, cy = boot.Height / 2 - 42;
+                for (int x = cx - 145; x < cx + 145; x += 6) for (int y = cy - 150; y < cy + 140; y += 6) if (splash.GetPixel(x, y) != nextFrame.GetPixel(x, y)) changedPixels++;
+                await Task.Delay(2400); if (boot.Visible || boot.FramesAdvanced < 3 || changedPixels < 30) throw new InvalidOperationException($"Boot animation did not advance and finish: frames={boot.FramesAdvanced}, changed pixels={changedPixels}, visible={boot.Visible}");
+            }
             async Task AwaitReady(Func<bool> ready) { var deadline = DateTime.UtcNow.AddSeconds(10); while (!ready() && DateTime.UtcNow < deadline) await Task.Delay(100); }
             await AwaitReady(() => tasks.Items.Count >= 3 && services.Text.Contains("demo") && session.Pending == 0);
             Send("ping"); Send("start demo"); Send("video"); await AwaitReady(() => session.Pending == 0 && selected == 6);
@@ -160,7 +213,8 @@ public sealed class MainWindow : Form
             }
             Send("stop demo"); await AwaitReady(() => session.Pending == 0 && services.Text.Split('\n').Any(line => line.StartsWith("demo") && line.Contains("Stopped"))); SelectPage(0);
             using var bitmap = new Bitmap(Width, Height); DrawToBitmap(bitmap, new Rectangle(0, 0, Width, Height)); bitmap.Save(Path.Combine(AppContext.BaseDirectory, "dashboard.png"));
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), $"PASS: {(initialPort ?? "Simulator")}, telemetry, tasks, commands, service state, media event, rendering" + (videoFile != null ? ", video frame rendering, ASCII decoding and cancellation" : ""));
+            foreach (var index in new[] { 2, 3, 4, 5, 6, 7 }) { SelectPage(index); using var page = new Bitmap(Width, Height); DrawToBitmap(page, new Rectangle(0, 0, Width, Height)); page.Save(Path.Combine(AppContext.BaseDirectory, $"page-{index}.png")); } SelectPage(0);
+            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), $"PASS: {(mode.SelectedIndex == 1 ? "Simulator" : mode.SelectedIndex == 0 ? "Auto " + port.Text : initialPort)}, boot animation, telemetry, tasks, commands, service state, media event, rendering" + (videoFile != null ? ", video frame rendering, ASCII decoding and cancellation" : ""));
             if (videoFile != null) { media.StartShutdownTest(videoFile); await Task.Delay(150); }
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "FAIL: " + e); Environment.ExitCode = 1; }

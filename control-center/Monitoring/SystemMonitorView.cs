@@ -6,7 +6,7 @@ public sealed class SystemMonitorView : UserControl
 {
     private readonly HistoryChart heap = new() { Dock = DockStyle.Fill };
     private readonly HistoryChart psram = new() { Dock = DockStyle.Fill };
-    private readonly Label stats = new() { Dock = DockStyle.Top, Height = 140, Font = new Font("Consolas", 12), ForeColor = Color.Gainsboro };
+    private readonly Label stats = new() { Dock = DockStyle.Top, Height = 145, Font = new Font("Consolas", 12), ForeColor = Theme.Ink };
     private readonly Queue<string> samples = new();
     public SystemMonitorView()
     {

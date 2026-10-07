@@ -7,4 +7,5 @@ firmware/sdkconfig
 .vs/
 backups/
 artifacts/
+/MikuOS.lnk
 firmware/sdkconfig.old
