@@ -1,0 +1,35 @@
+name: MikuOS builds
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Control Center and .NET checks
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: C++ host and kernel checks
+        shell: pwsh
+        run: |
+          cmake -S firmware -B firmware/build -DMIKU_HOST=ON
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build firmware/build --config Release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ctest --test-dir firmware/build -C Release --output-on-failure
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python tests/host_integration.py firmware/build/Release/miku-host.exe
+  firmware:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.2
+    steps:
+      - uses: actions/checkout@v4
+      - name: ESP32-S3 firmware
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py -C firmware -B build-esp32s3 -D IDF_TARGET=esp32s3 build

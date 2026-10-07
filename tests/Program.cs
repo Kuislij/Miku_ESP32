@@ -10,6 +10,7 @@ var decoder = new FrameDecoder();
 Check(decoder.Feed("invalid\n" + new string('x', 9000) + "\n" + wire).Single() == original && decoder.Rejected == 2, "overflow recovery");
 Check(new FrameDecoder().Feed(wire + wire).Count() == 2, "coalesced frames");
 Check(new FrameDecoder().Feed("2|CMD|1|cGluZw==\n1|CMD|1|!!!\n").Count() == 0, "version and base64 rejection");
+Check(new FrameDecoder().Feed("1|CMD|0|cGluZw==\n1|CMD|1|cGluZx==\n1|CMD|1|/w==\n").Count() == 0, "zero ID, noncanonical padding and invalid UTF-8 rejection");
 using var transport = new SimulatorTransport();
 var received = new List<Frame>(); var stream = new FrameDecoder();
 transport.Received += s => received.AddRange(stream.Feed(s)); transport.Connect();
@@ -21,4 +22,17 @@ Send("start missing", 15); Check(received.Any(f => f.Type == "ERR" && f.Id == 15
 Send("video", 16); Check(received.Any(f => f.Type == "EVT" && f.Payload == "media.ascii.open"), "media event");
 Send("reboot", 17); Check(received.Any(f => f.Type == "EVT" && f.Payload == "system.rebooted"), "reboot event");
 transport.Disconnect(); Check(!transport.Connected, "disconnect");
+using (var session = new MikuOS.Transport.DeviceSession())
+{
+    var replies = new List<Frame>(); session.FrameReceived += replies.Add;
+    session.Connect(new SimulatorTransport()); var id = session.Send("ping");
+    Check(replies.Any(f => f.Id == id && f.Payload == "pong") && session.Pending == 0, "session resolves synchronous simulator reply");
+    session.Send("config telemetry_ms 500"); session.Send("reboot"); var configId = session.Send("config");
+    Check(replies.Any(f => f.Id == configId && f.Payload == "telemetry_ms=500"), "simulator configuration survives reboot");
+    session.Disconnect(); Check(!session.Connected && session.Pending == 0, "session lifecycle cleanup");
+}
+var monochrome = MikuOS.Media.AsciiFrame.FromRgb(2, 1, [0, 0, 0, 255, 255, 255]);
+Check(monochrome.Text == " @\n", "ASCII luminance extremes");
+Check(monochrome.ToAnsi(MikuOS.Media.AsciiColorMode.TrueColor).Contains("\u001b[38;2;255;255;255m@"), "ANSI true color encoding");
+Check(monochrome.ToAnsi(MikuOS.Media.AsciiColorMode.Color256).Contains("\u001b[38;5;231m@"), "ANSI 256 palette encoding");
 Console.WriteLine($"{checks} checks passed");

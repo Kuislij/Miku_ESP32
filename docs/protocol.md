@@ -1,26 +1,34 @@
 # MikuOS wire protocol v1
 
-Транспорт — поток ASCII байтов. Каждый кадр: `1|TYPE|ID|BASE64(UTF8(payload))\n`. Разделитель LF, входной CRLF допускается. Максимум 8192 байта вместе с LF. Base64 устраняет неоднозначность разделителей, Unicode и переносов строк. Никаких переносов внутри Base64.
+Кадр: `1|TYPE|ID|BASE64(UTF8(payload))\n`. Поток ASCII, LF delimiting, CRLF на входе допускается. Максимум кадра 8192 байта включая LF, максимум декодированного payload 4096 байт. Base64 обязателен даже для обычного текста; пустой payload — пустое четвёртое поле.
 
-Пример ping: `1|CMD|42|cGluZw==` + LF. Ответ: `1|RES|42|cG9uZw==` + LF.
+Пример запроса: `1|CMD|42|cGluZw==` + LF; ответ: `1|RES|42|cG9uZw==` + LF.
 
-|TYPE|Назначение|ID|
+| TYPE | Payload | ID |
 |---|---|---|
-|CMD|Текст команды shell|1…4294967295|
-|RES|Окончательный ответ (может быть пустым)|ID команды|
-|ERR|Окончательная ошибка, текст|ID команды|
-|EVT|Имя события|0|
-|LOG|Строка журнала|0|
-|STAT|JSON статистики|0|
-|TASKS|JSON массива задач|0|
-|HB|Heartbeat, payload alive|0|
+| CMD | Текст команды shell | Ненулевой uint32 |
+| RES | Окончательный текстовый ответ | ID команды |
+| ERR | Окончательная текстовая ошибка | ID команды |
+| EVT | Имя события | 0 |
+| LOG | Строка журнала | 0 |
+| STAT | JSON статистики | 0 |
+| TASKS | JSON массива задач | 0 |
+| HB | alive | 0 |
 
-На CMD следует ровно один RES либо ERR; необязательные события/снимки могут идти перед ответом. Перезапуск устройства может разорвать соединение после подтверждения. Приложение не повторяет изменяющие состояние команды автоматически. Таймаут ответа — 5 секунд. До истечения диапазона ID клиент должен переподключиться (переполнение счётчика в текущем UI ещё не обрабатывается).
+Каждая принятая CMD получает ровно один RES/ERR, кроме физического разрыва или сбоя устройства. События, журнал и снимки могут идти до ответа. Reboot подтверждается и дожидается отправки UART перед restart. Пустая команда или неверные аргументы дают ERR. Повреждённому envelope без надёжного ID ответа нет. CMD с NUL получает ERR. Счётчик ID клиента обходит 0 и уже занятые ID при переполнении; pending ограничен 64, timeout 5 секунд.
 
-Декодер накапливает частичные строки, выдаёт несколько кадров из одного блока, отклоняет неизвестную версию/неправильный envelope/Base64 и восстанавливается на LF. При превышении лимита остаток строки отбрасывается до LF. .NET строго проверяет UTF-8, firmware рассматривает декодированную команду как байты; shell-команды ASCII. ID=0 зарезервирован соглашением, низкоуровневые декодеры его не запрещают. Повреждённым кадрам без надёжного ID ответ не отправляется. Счётчик ошибок доступен на стороне UI. Шифрования и аутентификации нет: локальный доверенный Serial. Перед сетевым транспортом нужно добавить защиту.
+Parser накапливает частичные кадры и обрабатывает несколько кадров в одном chunk. Он проверяет версию, числовой ID, canonical Base64 (включая padding), лимиты и UTF-8. При переполнении строка отбрасывается до LF. C++ вход принимает CMD, .NET вход принимает все перечисленные типы. ID=0 запрещён для CMD; ID=0 остальных типов — соглашение, не общая проверка parser. Firmware shell использует ASCII имена команд; UTF-8 может быть передан и отклонён как неизвестная команда.
 
-STAT: `{"model":"ESP32 (simulated)","firmware":"0.1.0","uptime":5,"freeHeap":220000,"taskCount":2,"load":null,"services":{"telemetry":true,"heartbeat":true,"demo":false}}`.
+STAT пример:
 
-uptime — целые секунды, freeHeap — байты, taskCount — активные сервисы MikuOS (не все FreeRTOS tasks), load — null до реализации измерения. TASKS: `[{"id":1,"name":"telemetry","state":"Running"}]` (стабильные ID сервисов).
+```json
+{"model":"ESP32-S3 N16R8","firmware":"0.2.0","uptime":21,"freeHeap":363295,"minHeap":360975,"largestBlock":270336,"psramSize":8388608,"freePsram":8376636,"flashSize":16777216,"resetReason":"software","droppedMessages":0,"telemetryMs":1000,"taskCount":2,"load":null,"services":{"telemetry":true,"heartbeat":true,"demo":false}}
+```
 
-События: system.connected, services.changed, system.rebooted (симулятор), terminal.clear, media.ascii.open. Heartbeat и telemetry периодичны раз в секунду, если соответствующий сервис включён. При отключении обоих сервисов статус STALE ожидаем; это индикатор отсутствия данных, не доказательство разрыва COM.
+Размеры памяти — байты. freeHeap/minHeap/largestBlock относятся только к внутренней RAM с MALLOC_CAP_8BIT, PSRAM измеряется отдельно. uptime — целые секунды; taskCount — активные сервисы MikuOS, а не все FreeRTOS tasks. load=null, пока нет достоверного измерителя. services bool означает enabled и не Faulted; точное состояние находится в TASKS.
+
+TASKS: `[{"id":1,"name":"telemetry","state":"Waiting","runs":10,"periodMs":1000}]`. Состояния Stopped, Ready, Running, Waiting, Faulted. ID определяется порядком регистрации, runs сохраняется при start/stop и сбрасывается при reboot.
+
+События: system.connected, services.changed, system.rebooted (host/simulator), terminal.clear, media.ascii.open. После физического reboot платы приходит system.connected. Heartbeat раз в секунду, STAT с интервалом telemetryMs. Если оба сервиса остановлены, отсутствие фоновых кадров ожидаемо; клиент может запрашивать info. Native USB, TCP и WebSocket пока не реализованы. Локальный Serial не шифруется; сетевой доступ должен получить отдельную защиту.
+
+Команды: help, ping, uname, version, uptime, mem, info, tasks, services, start/stop service, logs, config, config telemetry_ms 200..10000, clear, video, reboot, neofetch, miku. Конфигурация сохраняется в NVS на ESP32; simulator и host хранят её в памяти своего процесса/объекта.

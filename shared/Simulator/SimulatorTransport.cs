@@ -14,7 +14,7 @@ public sealed class SimulatorTransport : ITransport
     public bool Connected { get; private set; }
     public void Connect()
     {
-        lock (gate) { if (Connected) return; Connected = true; decoder = new(); Emit(new("EVT", 0, "system.connected")); Emit(device.Stats()); timer = new(_ => Tick(), null, 1000, 1000); }
+        lock (gate) { if (Connected) return; Connected = true; decoder = new(); Emit(new("EVT", 0, "system.connected")); Emit(device.Stats()); timer = new(_ => Tick(), null, 50, 50); }
     }
     private void Tick()
     {

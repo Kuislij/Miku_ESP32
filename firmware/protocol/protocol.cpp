@@ -2,7 +2,28 @@
 #include <limits>
 namespace miku {
 static const std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static bool utf8_valid(const std::string& text) {
+    size_t i = 0;
+    while (i < text.size()) {
+        const auto c = static_cast<unsigned char>(text[i++]);
+        if (c < 0x80) continue;
+        unsigned remaining = 0; uint32_t code = 0, minimum = 0;
+        if (c >= 0xc2 && c <= 0xdf) { remaining = 1; code = c & 0x1f; minimum = 0x80; }
+        else if (c >= 0xe0 && c <= 0xef) { remaining = 2; code = c & 0x0f; minimum = 0x800; }
+        else if (c >= 0xf0 && c <= 0xf4) { remaining = 3; code = c & 7; minimum = 0x10000; }
+        else return false;
+        while (remaining--) {
+            if (i == text.size()) return false;
+            const auto next = static_cast<unsigned char>(text[i++]);
+            if ((next & 0xc0) != 0x80) return false;
+            code = (code << 6) | (next & 0x3f);
+        }
+        if (code < minimum || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return false;
+    }
+    return true;
+}
 std::string encode(const Frame& f) {
+    if (f.payload.size() > 4096) return encode({"ERR", f.id, "Payload exceeds limit"});
     std::string b; unsigned val = 0; int bits = -6;
     for (unsigned char c : f.payload) { val = (val << 8) | c; bits += 8; while (bits >= 0) { b += alphabet[(val >> bits) & 63]; bits -= 6; } }
     if (bits > -6) b += alphabet[((val << 8) >> (bits + 8)) & 63];
@@ -21,8 +42,11 @@ static bool parse(const std::string& s, Frame& f) {
             const char c = b[i+j]; if (c == '=') { if (j < 2 || i + 4 != b.size()) return false; ++padding; value <<= 6; }
             else { auto index = alphabet.find(c); if (padding || index == std::string::npos) return false; value = (value << 6) | static_cast<unsigned>(index); }
         }
+        if ((padding == 2 && (value & 0xffff)) || (padding == 1 && (value & 0xff))) return false;
         payload += static_cast<char>(value >> 16); if (padding < 2) payload += static_cast<char>(value >> 8); if (!padding) payload += static_cast<char>(value);
     }
+    if (!id || payload.size() > 4096) return false;
+    if (!utf8_valid(payload)) return false;
     f = {"CMD", static_cast<uint32_t>(id), payload}; return true;
 }
 void Decoder::feed(const std::string& bytes, const std::function<void(const Frame&)>& callback) {

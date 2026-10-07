@@ -1,43 +1,93 @@
-# MikuOS
+# MikuOS 0.2
 
-Учебная мини-система ESP32 + Windows Forms Control Center. Первый рабочий вертикальный срез, версия 0.1.0. Плата не требуется: приложение автоматически подключается к Simulator.
+Учебная мини-система на **ESP32-S3-DevKitC-1 N16R8** и Windows Forms Control Center. Собственное кооперативное ядро поверх ESP-IDF/FreeRTOS, сервисы, IPC, shell и общий протокол. Simulator позволяет работать без платы.
 
-## Запуск на этом компьютере
+**7 октября 2026:** MikuOS собрана с ESP-IDF 5.5.2, прошита и проверена на настоящей ESP32-S3 через COM5. Подтверждены 16 MiB Flash и 8 MiB PSRAM, команды, перезапуск и сохранение настроек. Это рабочая учебная версия; подробности и границы проверки — в [hardware-testing.md](docs/hardware-testing.md).
 
-Откройте `Start-MikuOS.cmd` в корне проекта. Локальный .NET 8 SDK установлен в `.tools/dotnet` (не входит в исходники). Либо выполните:
+## Запуск
 
-```powershell
-.tools/dotnet/dotnet.exe run --project control-center/MikuOS.ControlCenter.csproj -c Release
+- `Start-MikuOS-Device.cmd` — подключиться к плате на COM5. Другой порт можно передать аргументом, например `Start-MikuOS-Device.cmd COM7`.
+- `Start-MikuOS.cmd` — запустить приложение с сохранённым режимом. При первом запуске выбран Simulator.
+- Готовая автономная сборка на этом компьютере: `artifacts/ControlCenter/MikuOS.ControlCenter.exe`. Её папку можно скопировать целиком на другой Windows x64; отдельная установка .NET не нужна. Эта папка исключена из Git.
+
+В приложении доступны Dashboard, Terminal, Tasks, Services, System Monitor, Logs, Media и Settings. Для Serial используется разъём платы **USB-UART**, 115200/8N1. Нативный USB/OTG пока не подключён к протоколу MikuOS.
+
+## Возможности
+
+- Регистрация до 16 сервисов через собственный API; состояния Ready / Running / Waiting / Stopped / Faulted, период и счётчик запусков.
+- Ограниченная очередь IPC, счётчик потерь, журнал из 24 записей, watchdog системного worker.
+- Реальные показатели внутреннего heap: свободная память, минимум, крупнейший блок; отдельно PSRAM и размер Flash, причина перезапуска.
+- Настройка интервала телеметрии 200–10000 мс с сохранением в NVS.
+- Терминал с историей до 200 команд, цветами, timestamp и переключаемой автопрокруткой.
+- Выбор COM-портов, повторное подключение после исчезновения порта, таймауты запросов и индикатор отсутствия данных.
+- Графики последних 120 образцов, экспорт последних 3600 образцов в CSV и экспорт журнала.
+- Локальное видео внутри приложения: FFmpeg → собственный WinForms canvas, 640×360 / 24 FPS; звук через LibVLC.
+- ASCII Video в терминале: 96×30 / 10 FPS, монохромный, 256-цветный и true-color режимы; экспорт кадра ANSI. Пауза и остановка доступны на Media, остановка также в Terminal.
+- Команда `video` переключает Media через событие устройства. Вся обработка видео выполняется на ПК.
+
+Попробуйте в Terminal:
+
+```text
+neofetch
+info
+tasks
+start demo
+logs
+stop demo
+config
+config telemetry_ms 500
+video
 ```
 
-На другом компьютере нужен .NET 8 SDK для Windows. Используйте обычный `dotnet` вместо локального пути. Готовая сборка находится в `control-center/bin/Release/net8.0-windows`; для её запуска нужен .NET 8 Desktop Runtime x64.
+CPU load пока передаётся как `null`: достоверный измеритель ещё не реализован. Wi-Fi, BLE, SD/TFT, OTA, файловая система и расширенные сетевые транспорты — дальнейшие модули. Раздел storage в таблице разделов зарезервирован и пока не смонтирован. У симулятора память синтетическая, конфигурация сохраняется только в пределах его объекта. Видео выводится с ограничением разрешения/FPS, ASCII воспроизводится без звука; точная синхронизация звука и видео и перемотка пока не реализованы.
 
-## Что работает
+## Сборка из исходников
 
-- WinForms, тёмная тема, бирюзовые акценты; Dashboard, Terminal, Tasks, Services, Logs.
-- История команд стрелками, timestamps, цветные ответы, автопрокрутка.
-- Уptime, heap, график последних 120 измерений, RX/TX, обнаружение отсутствия данных и таймаутов ответов.
-- Simulator и Serial 115200/8N1 через общий транспорт; строгий протокол с фрагментацией и восстановлением после повреждённых строк.
-- Симулятор: команды `help`, `ping`, `info`, `tasks`, `services`, `start demo`, `stop demo`, `uptime`, `mem`, `logs`, `reboot`, `clear`, `version`, `uname`, `neofetch`, `miku`, `video`.
-- C++ firmware: переносимое кооперативное ядро, состояния сервисов, очередь IPC на 32 сообщения, системный тик, shell, протокол; ESP-IDF UART и watchdog адаптер.
-- C++ host/mock позволяет собирать и проверять логику firmware без ESP-IDF.
+Нужны Git, .NET 8 SDK x64 и Python 3.11; для host C++ — Visual Studio с C++/CMake либо другой C++17-компилятор.
 
-`video` уже открывает Media через событие протокола. Воспроизведение видео и ASCII-декодер **ещё не реализованы**: это следующий этап. System Monitor пока объясняет метрики; график находится на Dashboard. Анимации, постоянное хранение настроек, расширенные пользовательские задачи, GPIO/storage и кольцевой журнал firmware также остаются дальнейшими этапами. CPU load не выдумывается: передаётся `null`. Память симулятора — синтетическая.
+```powershell
+./scripts/setup-media.ps1
+./scripts/build.ps1
+./scripts/publish.ps1
+./scripts/setup-esp.ps1
+./scripts/build-firmware.ps1
+```
 
-## Проверка
+`setup-esp.ps1` устанавливает закреплённый ESP-IDF 5.5.2 и инструменты для esp32s3 в `.tools`. Скрипты не меняют системный PATH постоянно. На этом компьютере .NET SDK также находится в `.tools/dotnet`. При корпоративном HTTPS-прокси можно задать PIP_CERT / SSL_CERT_FILE / REQUESTS_CA_BUNDLE с доверенным сертификатом, не отключая проверку TLS.
+
+Прошивка после сборки:
+
+```powershell
+./scripts/flash-firmware.ps1 -Port COM5
+```
+
+Скрипт сначала сохраняет полный backup, проверяет размер 16 MiB, затем записывает bootloader, partition table и приложение. Полного стирания Flash нет. Резервные копии содержат данные устройства и исключены из Git.
+
+## Тесты
 
 ```powershell
 ./scripts/build.ps1
-.tools/dotnet/dotnet.exe control-center/bin/Release/net8.0-windows/MikuOS.ControlCenter.dll --smoke
 cmake -S firmware -B firmware/build -DMIKU_HOST=ON
 cmake --build firmware/build --config Release
 ctest --test-dir firmware/build -C Release --output-on-failure
+py -3.11 tests/host_integration.py firmware/build/Release/miku-host.exe
+./.tools/python/Scripts/python.exe scripts/hardware-test.py --port COM5
+./.tools/dotnet/dotnet.exe control-center/bin/Release/net8.0-windows/MikuOS.ControlCenter.dll --smoke
 ```
 
-UI smoke запускает настоящее окно, проверяет обмен и навигацию, сохраняет `dashboard.png` и `smoke-result.txt` рядом со сборкой, затем закрывается. CMake здесь обнаружен в установленной Visual Studio; при отсутствии в PATH используйте Developer PowerShell.
+UI smoke также поддерживает `--serial COM5` и `--video-test C:/path/to/video.mp4`. Он выполняет команды start/stop demo и сохраняет результаты/изображения рядом со сборкой. Аппаратный тест временно меняет интервал, перезапускает плату и возвращает прежний интервал при успешном завершении. При прерывании теста проверьте `config` вручную. Тесты нельзя запускать одновременно с другим приложением, занимающим COM-порт.
 
-## ESP32 позже
+GitHub Actions собирает Control Center и host, запускает .NET/C++ проверки и отдельно собирает ESP32-S3 firmware в ESP-IDF контейнере. Аппаратные проверки выполняются локально, а не в CI.
 
-В окружении ESP-IDF 5.x: `cd firmware`, `idf.py set-target esp32`, `idf.py build`. Прошивка и реальные проверки выполняются только после появления платы. ESP-IDF сейчас не установлен; ESP32-адаптер не собран и аппаратно не проверен. UART0 использует стандартные пины целевой платы, нужен USB-UART; native USB для других моделей требует отдельной конфигурации.
+## Структура
 
-См. `docs/architecture.md`, `docs/protocol.md`, `docs/hardware-testing.md`.
+```text
+firmware/        kernel, shell, protocol, platform, ESP-IDF main
+shared/          общий .NET protocol, session, simulator, ASCII conversion
+control-center/  UI, Serial, Terminal, Monitoring, Media
+tests/           .NET tests + C++ kernel tests
+scripts/         setup, build, flash, restore, hardware checks
+docs/            архитектура, протокол, аппаратные проверки
+```
+
+Документы: [архитектура](docs/architecture.md), [протокол](docs/protocol.md), [аппаратные проверки](docs/hardware-testing.md), [зависимости Media](docs/media.md).
