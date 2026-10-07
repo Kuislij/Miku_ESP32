@@ -48,6 +48,7 @@ using (var discoveryCancel = new CancellationTokenSource())
     try { await MikuOS.Transport.DeviceDiscovery.FindAsync(["silent"], Probe, TimeSpan.FromSeconds(3), discoveryCancel.Token); throw new Exception("discovery ignored cancellation"); }
     catch (OperationCanceledException) { Check(probes[^1].Disposed, "discovery cancellation releases transport promptly"); }
 }
+await FileTests.Run(Check);
 Console.WriteLine($"{checks} checks passed");
 
 sealed class ProbeTransport(string behavior) : MikuOS.Transport.ITransport

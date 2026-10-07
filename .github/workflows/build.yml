@@ -23,6 +23,8 @@ jobs:
           ctest --test-dir firmware/build -C Release --output-on-failure
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python tests/host_integration.py firmware/build/Release/miku-host.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python tests/storage_integration.py --host firmware/build/Release/miku-host.exe
   firmware:
     runs-on: ubuntu-latest
     container: espressif/idf:v5.5.2

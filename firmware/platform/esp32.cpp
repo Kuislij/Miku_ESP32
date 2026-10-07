@@ -7,7 +7,20 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_vfs_fat.h"
+#include "esp_random.h"
+#include "esp_task_wdt.h"
 namespace miku {
+Esp32Platform::Esp32Platform() {
+    esp_vfs_fat_mount_config_t config{};
+    config.format_if_mount_failed = false; config.max_files = 4; config.allocation_unit_size = 4096;
+    wl_handle_t handle = WL_INVALID_HANDLE;
+    bool mounted = esp_vfs_fat_spiflash_mount_rw_wl("/data", "storage", &config, &handle) == ESP_OK;
+    store_ = FileStore("/data", mounted);
+}
+uint32_t Esp32Platform::storage_nonce() const { return esp_random(); }
+void Esp32Platform::cooperate() { esp_task_wdt_reset(); vTaskDelay(1); }
 void Esp32Platform::initialize() {
     // Keep existing NVS intact. Incompatible/full storage is surfaced rather than erased.
     ESP_ERROR_CHECK(nvs_flash_init());

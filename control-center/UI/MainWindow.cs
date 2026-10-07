@@ -26,6 +26,7 @@ public sealed class MainWindow : Form
     private readonly ListView tasks = new() { Dock = DockStyle.Fill, View = View.Details, BackColor = Theme.Surface, ForeColor = Theme.Ink, FullRowSelect = true, BorderStyle = BorderStyle.None };
     private readonly Label services = new() { Dock = DockStyle.Fill, Font = new Font("Consolas", 13), Padding = new(20), ForeColor = Theme.Ink };
     private readonly DeviceSession session = new();
+    private readonly FileManagerView files;
     private readonly HashSet<uint> silentReplies = new();
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 1000 };
     private int selected;
@@ -40,10 +41,11 @@ public sealed class MainWindow : Form
     public MainWindow(string? serialPort = null, bool smoke = false, bool simulator = false, bool automatic = false)
     {
         initialPort = serialPort; testing = smoke;
+        files = new(session);
         Text = "MikuOS"; Size = new(1280, 890); MinimumSize = new(1120, 820); StartPosition = FormStartPosition.CenterScreen;
         BackColor = Theme.Background; ForeColor = Theme.Ink; Font = new Font("Segoe UI", 10); Padding = new(25, 12, 25, 22); DoubleBuffered = true;
         var header = new Panel { Dock = DockStyle.Top, Height = 66 };
-        var brand = new Label { Text = "MikuOS", Dock = DockStyle.Left, Width = 180, ForeColor = Theme.Accent, Font = new Font("Segoe UI", 21, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
+        var brand = new Label { Text = "MikuOS", Dock = DockStyle.Left, Width = 170, ForeColor = Theme.Accent, Font = new Font("Segoe UI", 21, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
         var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true, Padding = new(0, 13, 0, 0) };
         header.Controls.Add(nav); header.Controls.Add(brand);
         var bar = new Panel { Dock = DockStyle.Top, Height = 54, Padding = new(0, 4, 3, 10) };
@@ -58,7 +60,7 @@ public sealed class MainWindow : Form
         void Add(string title, Control page)
         {
             int index = pages.Count; page.Dock = DockStyle.Fill; page.Visible = false; content.Controls.Add(page); pages.Add(page);
-            var button = Theme.Button(title); button.MinimumSize = new(0, 37); button.Margin = new(2, 0, 2, 0); button.Padding = new(13, 4, 13, 4); button.Font = new Font("Segoe UI", 9, FontStyle.Bold);
+            var button = Theme.Button(title); button.MinimumSize = new(0, 37); button.Margin = new(2, 0, 2, 0); button.Padding = new(10, 4, 10, 4); button.Font = new Font("Segoe UI", 9, FontStyle.Bold);
             button.Click += (_, _) => SelectPage(index); nav.Controls.Add(button); navigation.Add(button);
         }
         tasks.Columns.Add("ID", 65); tasks.Columns.Add("Задача", 210); tasks.Columns.Add("Состояние", 180); tasks.Columns.Add("Запуски", 100); tasks.Columns.Add("Период, мс", 140);
@@ -71,6 +73,7 @@ public sealed class MainWindow : Form
         var exportLogs = Theme.Button("Сохранить журнал"); exportLogs.Click += (_, _) => { using var d = new SaveFileDialog { Filter = "Text|*.txt", FileName = "miku-logs.txt" }; if (d.ShowDialog(this) == DialogResult.OK) logs.SaveFile(d.FileName, RichTextBoxStreamType.PlainText); };
         var readLogs = Theme.Button("Прочитать журнал платы"); readLogs.Click += (_, _) => { SelectPage(1); Send("logs"); };
         logButtons.Controls.AddRange([exportLogs, readLogs]); logPanel.Controls.Add(logs); logPanel.Controls.Add(logButtons); Add("Журнал", CardPage(logPanel)); Add("Медиа", CardPage(media)); Add("Настройки", CardPage(Settings()));
+        Add("Файлы", CardPage(files)); nav.Controls.SetChildIndex(navigation[8], 2);
         Controls.Add(content); Controls.Add(bar); Controls.Add(header); Controls.Add(boot); boot.BringToFront(); boot.Visible = bootEnabled.Checked; SelectPage(0);
         dashboard.ActionRequested += SelectPage;
         media.AsciiReady += (frame, color) => { if (!asciiActive) { asciiActive = true; SelectPage(1); } terminal.ShowVideo(frame, color); };
@@ -82,7 +85,11 @@ public sealed class MainWindow : Form
         session.Error += message => Post(() => terminal.Write(message, Color.Salmon));
         timer.Tick += (_, _) => Tick(); timer.Start();
         Shown += (_, _) => BeginConnection();
-        FormClosing += (_, _) => { closing = true; lifetime.Cancel(); discoveryCancellation?.Cancel(); timer.Stop(); autoReconnect = false; session.Dispose(); timer.Dispose(); };
+        FormClosing += async (_, e) =>
+        {
+            if (!closing && !testing && files.HasUnsavedChanges) { e.Cancel = true; if (await files.ConfirmLeaveAsync()) { closing = true; Close(); } return; }
+            closing = true; lifetime.Cancel(); discoveryCancellation?.Cancel(); timer.Stop(); autoReconnect = false; files.ConnectionChanged(false); session.Dispose(); timer.Dispose();
+        };
     }
     private static Control CardPage(Control page) { var panel = new SoftPanel { Dock = DockStyle.Fill, Padding = new(22) }; panel.Controls.Add(page); page.Dock = DockStyle.Fill; return panel; }
     private Control Settings()
@@ -146,12 +153,13 @@ public sealed class MainWindow : Form
             autoReconnect = mode.SelectedIndex != 1; connect.Text = "Отключить"; mode.Enabled = port.Enabled = false;
             dashboard.Reset(); monitor.Reset(); tasks.Items.Clear(); services.Text = "Waiting for service snapshot…";
             silentReplies.Clear(); Send("ping", true); Send("info", true); Send("tasks", true);
+            files.ConnectionChanged(true, mode.SelectedIndex == 1);
             boot.ConnectionText = mode.SelectedIndex == 1 ? "Демонстрация готова!" : "Подключаемся к ESP32…";
             SavePreferences();
         }
         catch (Exception e) { terminal.Write("Не удалось подключиться: " + e.Message, Color.Salmon); session.Disconnect(); if (!autoReconnect) { mode.Enabled = true; port.Enabled = mode.SelectedIndex == 2; } nextRetry = DateTime.UtcNow.AddSeconds(3); }
     }
-    private void Disconnect() { discoveryCancellation?.Cancel(); connectionGeneration++; session.Disconnect(); connect.Text = "Подключить"; mode.Enabled = true; port.Enabled = mode.SelectedIndex == 2; status.Text = "●  Не подключено"; dashboard.Reset(); monitor.Reset(); tasks.Items.Clear(); services.Text = "Нет подключения"; }
+    private void Disconnect() { discoveryCancellation?.Cancel(); connectionGeneration++; session.Disconnect(); files.ConnectionChanged(false); connect.Text = "Подключить"; mode.Enabled = true; port.Enabled = mode.SelectedIndex == 2; status.Text = "●  Не подключено"; dashboard.Reset(); monitor.Reset(); tasks.Items.Clear(); services.Text = "Нет подключения"; }
     private void Post(Action action) { if (closing || IsDisposed || !IsHandleCreated) return; try { BeginInvoke((Action)(() => { if (!closing) action(); })); } catch (InvalidOperationException) { } }
     private void Send(string command) => Send(command, false);
     private void Send(string command, bool quiet)
@@ -177,7 +185,7 @@ public sealed class MainWindow : Form
     private void Tick()
     {
         if (closing) return; session.ExpireRequests(); if (silentReplies.Count > 128) silentReplies.Clear(); var now = DateTime.UtcNow;
-        if (autoReconnect && session.Connected && (!SerialPort.GetPortNames().Contains(port.Text, StringComparer.OrdinalIgnoreCase) || now - (session.LastFrame == DateTime.MinValue ? connectedAt : session.LastFrame) > TimeSpan.FromSeconds(15))) { connectionGeneration++; session.Disconnect(); dashboard.Reset(); monitor.Reset(); tasks.Items.Clear(); services.Text = "Ждём повторное подключение"; nextRetry = now.AddSeconds(2); }
+        if (autoReconnect && session.Connected && (!SerialPort.GetPortNames().Contains(port.Text, StringComparer.OrdinalIgnoreCase) || now - (session.LastFrame == DateTime.MinValue ? connectedAt : session.LastFrame) > TimeSpan.FromSeconds(15))) { connectionGeneration++; session.Disconnect(); files.ConnectionChanged(false); dashboard.Reset(); monitor.Reset(); tasks.Items.Clear(); services.Text = "Ждём повторное подключение"; nextRetry = now.AddSeconds(2); }
         if (autoReconnect && !session.Connected && now >= nextRetry && !discovering) { nextRetry = now.AddSeconds(3); if (mode.SelectedIndex == 0) _ = Discover(); else Connect(); return; }
         if (session.Connected)
         {
@@ -212,9 +220,10 @@ public sealed class MainWindow : Form
                 using var asciiImage = new Bitmap(Width, Height); DrawToBitmap(asciiImage, new Rectangle(0, 0, Width, Height)); asciiImage.Save(Path.Combine(AppContext.BaseDirectory, "ascii-terminal.png")); terminal.HideVideo();
             }
             Send("stop demo"); await AwaitReady(() => session.Pending == 0 && services.Text.Split('\n').Any(line => line.StartsWith("demo") && line.Contains("Stopped"))); SelectPage(0);
+            await files.VerifyFiles();
             using var bitmap = new Bitmap(Width, Height); DrawToBitmap(bitmap, new Rectangle(0, 0, Width, Height)); bitmap.Save(Path.Combine(AppContext.BaseDirectory, "dashboard.png"));
-            foreach (var index in new[] { 2, 3, 4, 5, 6, 7 }) { SelectPage(index); using var page = new Bitmap(Width, Height); DrawToBitmap(page, new Rectangle(0, 0, Width, Height)); page.Save(Path.Combine(AppContext.BaseDirectory, $"page-{index}.png")); } SelectPage(0);
-            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), $"PASS: {(mode.SelectedIndex == 1 ? "Simulator" : mode.SelectedIndex == 0 ? "Auto " + port.Text : initialPort)}, boot animation, telemetry, tasks, commands, service state, media event, rendering" + (videoFile != null ? ", video frame rendering, ASCII decoding and cancellation" : ""));
+            foreach (var index in new[] { 2, 3, 4, 5, 6, 7, 8 }) { SelectPage(index); using var page = new Bitmap(Width, Height); DrawToBitmap(page, new Rectangle(0, 0, Width, Height)); page.Save(Path.Combine(AppContext.BaseDirectory, $"page-{index}.png")); } SelectPage(0);
+            File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), $"PASS: {(mode.SelectedIndex == 1 ? "Simulator" : mode.SelectedIndex == 0 ? "Auto " + port.Text : initialPort)}, boot animation, telemetry, tasks, commands, service state, media event, files/editor/copy/rename, rendering" + (videoFile != null ? ", video frame rendering, ASCII decoding and cancellation" : ""));
             if (videoFile != null) { media.StartShutdownTest(videoFile); await Task.Delay(150); }
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "smoke-result.txt"), "FAIL: " + e); Environment.ExitCode = 1; }

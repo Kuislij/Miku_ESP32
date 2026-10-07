@@ -18,7 +18,7 @@ Kernel::Kernel(Platform& platform) : platform_(platform) {
     register_service("telemetry", period, true, [this] { post({"STAT", stats()}); return true; });
     register_service("heartbeat", 1000, true, [this] { post({"HB", "alive"}); return true; });
     register_service("demo", 5000, false, [this] { log("demo service tick"); return true; });
-    log("MikuOS 0.2.0 boot complete");
+    log("MikuOS 0.3.0 boot complete");
 }
 bool Kernel::register_service(std::string name, uint32_t period, bool enabled, std::function<bool()> step) {
     if (ticking_ || services_.size() >= 16 || name.empty() || name.size() > 24 || !period || !step) return false;
@@ -65,7 +65,7 @@ void Kernel::tick() {
 }
 std::string Kernel::stats() const {
     std::ostringstream out; unsigned count = 0; for (const auto& s : services_) if (s.state != TaskState::Stopped && s.state != TaskState::Faulted) ++count;
-    out << "{\"model\":\"" << platform_.model() << "\",\"firmware\":\"0.2.0\",\"uptime\":" << platform_.milliseconds()/1000
+    out << "{\"model\":\"" << platform_.model() << "\",\"firmware\":\"0.3.0\",\"uptime\":" << platform_.milliseconds()/1000
         << ",\"freeHeap\":" << platform_.free_heap() << ",\"minHeap\":" << platform_.minimum_heap()
         << ",\"largestBlock\":" << platform_.largest_block() << ",\"psramSize\":" << platform_.psram_size() << ",\"freePsram\":" << platform_.free_psram()
         << ",\"flashSize\":" << platform_.flash_size() << ",\"resetReason\":\"" << platform_.reset_reason()

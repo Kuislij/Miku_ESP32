@@ -74,7 +74,7 @@ with serial.Serial() as port:
     command('info')
     check(bool(stats), 'STAT received')
     initial = stats[-1]
-    check(initial['firmware'] == '0.2.0', 'firmware version')
+    check(initial['firmware'] == '0.3.0', 'firmware version')
     check(initial['flashSize'] == 16 * 1048576, '16 MiB Flash detected')
     check(initial['psramSize'] >= 8_000_000, '8 MiB PSRAM initialized')
     check(initial['freeHeap'] > 100_000, 'internal heap available')

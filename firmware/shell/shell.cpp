@@ -7,11 +7,12 @@ void Shell::handle(const Frame& f) {
     std::istringstream input(f.payload); std::string cmd; input >> cmd; std::vector<std::string> args; std::string word; while (input >> word) args.push_back(word);
     auto error = [&](const std::string& message) { send("ERR", f.id, message); };
     if (cmd.empty()) { error("Empty command"); return; }
+    if (FileService::accepts(cmd)) { auto reply = files_.handle(f); send(reply.type, reply.id, reply.payload); return; }
     if (cmd != "start" && cmd != "stop" && cmd != "config" && !args.empty()) { error("Command takes no arguments"); return; }
     std::string result;
     if (cmd == "ping") result = "pong";
-    else if (cmd == "help") result = "help ping uname version uptime mem info tasks services start <service> stop <service> logs config [telemetry_ms 200..10000] clear video reboot neofetch miku";
-    else if (cmd == "uname" || cmd == "version") result = "MikuOS 0.2.0 / miku-kernel / protocol 1 / " + kernel_.platform().model();
+    else if (cmd == "help") result = "help ping uname version uptime mem info tasks services start <service> stop <service> logs config [telemetry_ms 200..10000] clear video reboot neofetch miku\nFiles: ls [path], cat path, mkdir path, rm path, mv from to, cp from to, touch path, write path \"text\", df\nQuote paths with spaces. Large and binary files: Files in Control Center.";
+    else if (cmd == "uname" || cmd == "version") result = "MikuOS 0.3.0 / miku-kernel / protocol 1 / " + kernel_.platform().model();
     else if (cmd == "uptime") result = std::to_string(kernel_.platform().milliseconds()/1000) + " seconds";
     else if (cmd == "mem") result = "Internal free: " + std::to_string(kernel_.platform().free_heap()) + " bytes\nMinimum: " + std::to_string(kernel_.platform().minimum_heap()) + " bytes\nPSRAM free/total: " + std::to_string(kernel_.platform().free_psram()) + "/" + std::to_string(kernel_.platform().psram_size());
     else if (cmd == "info") { send("STAT", 0, kernel_.stats()); result = "System snapshot emitted"; }
@@ -32,10 +33,10 @@ void Shell::handle(const Frame& f) {
     }
     else if (cmd == "clear") send("EVT", 0, "terminal.clear");
     else if (cmd == "video") send("EVT", 0, "media.ascii.open");
-    else if (cmd == "miku" || cmd == "neofetch") result = " /\\ /\\  MikuOS\n | <> |  miku-kernel 0.2.0\n Device: " + kernel_.platform().model() + "\n Uptime: " + std::to_string(kernel_.platform().milliseconds()/1000) + "s\n Internal heap: " + std::to_string(kernel_.platform().free_heap()) + " bytes\n Link: Serial / protocol 1";
+    else if (cmd == "miku" || cmd == "neofetch") result = " /\\ /\\  MikuOS\n | <> |  miku-kernel 0.3.0\n Device: " + kernel_.platform().model() + "\n Uptime: " + std::to_string(kernel_.platform().milliseconds()/1000) + "s\n Internal heap: " + std::to_string(kernel_.platform().free_heap()) + " bytes\n Link: Serial / protocol 1";
     else if (cmd == "reboot") { send("RES", f.id, "Rebooting"); kernel_.platform().reboot(); return; }
     else { error("Unknown command: " + cmd); return; }
     send("RES", f.id, result);
 }
-void Shell::pump() { kernel_.tick(); Message m; while (kernel_.receive(m)) { const bool event = m.topic == "services.changed"; kernel_.platform().write(encode({event ? "EVT" : m.topic, 0, event ? m.topic : m.payload})); } }
+void Shell::pump() { files_.tick(); kernel_.tick(); Message m; while (kernel_.receive(m)) { const bool event = m.topic == "services.changed"; kernel_.platform().write(encode({event ? "EVT" : m.topic, 0, event ? m.topic : m.payload})); } }
 }

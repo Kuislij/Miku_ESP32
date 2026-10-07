@@ -5,10 +5,15 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <filesystem>
 class Host final : public miku::Platform {
     std::chrono::steady_clock::time_point boot = std::chrono::steady_clock::now();
     uint32_t telemetry_period = 1000;
+    miku::FileStore store;
 public:
+    explicit Host(const std::string& directory) : store(directory, true) { std::filesystem::create_directories(std::filesystem::u8path(directory)); }
+    miku::FileStore* files() override { return &store; }
+    uint32_t storage_nonce() const override { return static_cast<uint32_t>(std::chrono::system_clock::now().time_since_epoch().count()); }
     bool restarting = false;
     uint64_t milliseconds() const override { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-boot).count(); }
     uint32_t free_heap() const override { return 220000; }
@@ -18,8 +23,10 @@ public:
     uint32_t config_read(const char*, uint32_t) const override { return telemetry_period; }
     bool config_write(const char*, uint32_t value) override { telemetry_period = value; return true; }
 };
-int main() {
-    Host platform; auto kernel = std::make_unique<miku::Kernel>(platform); auto shell = std::make_unique<miku::Shell>(*kernel); miku::Decoder decoder;
+int main(int argc, char** argv) {
+    auto directory = std::filesystem::temp_directory_path() / "miku-host-storage";
+    if (argc == 3 && std::string(argv[1]) == "--storage-root") directory = std::filesystem::u8path(argv[2]);
+    Host platform(std::filesystem::absolute(directory).lexically_normal().u8string()); auto kernel = std::make_unique<miku::Kernel>(platform); auto shell = std::make_unique<miku::Shell>(*kernel); miku::Decoder decoder;
     std::mutex gate; std::condition_variable available; std::deque<std::string> input; bool done = false;
     std::thread reader([&] {
         std::string chunk; char c;

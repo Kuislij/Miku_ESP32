@@ -1,4 +1,24 @@
-# Control Center 0.3 — проверка 7 октября 2026
+# Control Center — проверка 7 октября 2026
+
+## Control Center 0.4 / Firmware 0.3
+
+94 .NET проверки прошли, включая асинхронные RPC, файл с двоичными данными, многостраничный каталог, конфликт версии, отмену upload/copy, reconnect, reboot, timeout и disconnect. C++ kernel/storage unit tests и host-интеграция проходят отдельно.
+
+Готовая автономная Windows x64 сборка автоматически находит COM5. Проверены настоящий файловый менеджер и редактор: отдельная тестовая папка, чтение UTF-8, правки в RichTextBox, запись на ESP32, повторное чтение, copy/rename и удаление своей папки. Smoke сверяет полные байты с BOM и CRLF. Переподключение не заменяет несохранённый буфер редактора.
+
+Также повторно проверены заставка, реальные STAT/TASKS, команды и service state, обычное видео, ASCII и отмена/закрытие FFmpeg. Скриншот страницы «Файлы» — [screenshots/files.png](screenshots/files.png). Он показывает настоящий FATFS-том платы. Начальные файлы читаются через USB, локальный demo-том не используется.
+
+Результат полной проверки:
+
+```text
+PASS: Auto COM5, boot animation, telemetry, tasks, commands, service state,
+media event, files/editor/copy/rename, rendering,
+video frame rendering, ASCII decoding and cancellation
+```
+
+Ниже сохранён отчёт предыдущей версии.
+
+## Control Center 0.3
 
 Проверена автономная Windows x64 сборка `artifacts/ControlCenter/MikuOS.ControlCenter.exe`, созданная `scripts/publish.ps1`. Firmware на плате остаётся 0.2.0.
 

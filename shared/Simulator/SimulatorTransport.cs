@@ -6,7 +6,8 @@ namespace MikuOS.Simulator;
 public sealed class SimulatorTransport : ITransport
 {
     private readonly object gate = new();
-    private readonly SimulatedDevice device = new();
+    private static readonly SimulatedFiles DemoStorage = new();
+    private readonly SimulatedDevice device = new(DemoStorage);
     private FrameDecoder decoder = new();
     private Timer? timer;
     public event Action<string>? Received;

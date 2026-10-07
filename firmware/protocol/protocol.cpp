@@ -2,7 +2,7 @@
 #include <limits>
 namespace miku {
 static const std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-static bool utf8_valid(const std::string& text) {
+bool utf8_valid(const std::string& text) {
     size_t i = 0;
     while (i < text.size()) {
         const auto c = static_cast<unsigned char>(text[i++]);
@@ -22,20 +22,19 @@ static bool utf8_valid(const std::string& text) {
     }
     return true;
 }
-std::string encode(const Frame& f) {
-    if (f.payload.size() > 4096) return encode({"ERR", f.id, "Payload exceeds limit"});
+std::string base64_encode(const std::string& bytes) {
     std::string b; unsigned val = 0; int bits = -6;
-    for (unsigned char c : f.payload) { val = (val << 8) | c; bits += 8; while (bits >= 0) { b += alphabet[(val >> bits) & 63]; bits -= 6; } }
+    for (unsigned char c : bytes) { val = (val << 8) | c; bits += 8; while (bits >= 0) { b += alphabet[(val >> bits) & 63]; bits -= 6; } }
     if (bits > -6) b += alphabet[((val << 8) >> (bits + 8)) & 63];
     while (b.size() % 4) b += '=';
-    return "1|" + f.type + '|' + std::to_string(f.id) + '|' + b + '\n';
+    return b;
 }
-static bool parse(const std::string& s, Frame& f) {
-    if (s.rfind("1|CMD|", 0) != 0) return false;
-    auto end = s.find('|', 6); if (end == std::string::npos || end == 6) return false;
-    uint64_t id = 0; for (size_t i = 6; i < end; ++i) { if (s[i] < '0' || s[i] > '9') return false; id = id * 10 + s[i] - '0'; if (id > std::numeric_limits<uint32_t>::max()) return false; }
-    const auto b = s.substr(end + 1); if (b.size() % 4) return false;
-    std::string payload;
+std::string encode(const Frame& f) {
+    if (f.payload.size() > 4096) return encode({"ERR", f.id, "Payload exceeds limit"});
+    return "1|" + f.type + '|' + std::to_string(f.id) + '|' + base64_encode(f.payload) + '\n';
+}
+bool base64_decode(const std::string& b, std::string& payload) {
+    payload.clear(); if (b.size() % 4) return false;
     for (size_t i = 0; i < b.size(); i += 4) {
         unsigned value = 0; int padding = 0;
         for (size_t j = 0; j < 4; ++j) {
@@ -45,7 +44,14 @@ static bool parse(const std::string& s, Frame& f) {
         if ((padding == 2 && (value & 0xffff)) || (padding == 1 && (value & 0xff))) return false;
         payload += static_cast<char>(value >> 16); if (padding < 2) payload += static_cast<char>(value >> 8); if (!padding) payload += static_cast<char>(value);
     }
-    if (!id || payload.size() > 4096) return false;
+    return true;
+}
+static bool parse(const std::string& s, Frame& f) {
+    if (s.rfind("1|CMD|", 0) != 0) return false;
+    auto end = s.find('|', 6); if (end == std::string::npos || end == 6) return false;
+    uint64_t id = 0; for (size_t i = 6; i < end; ++i) { if (s[i] < '0' || s[i] > '9') return false; id = id * 10 + s[i] - '0'; if (id > std::numeric_limits<uint32_t>::max()) return false; }
+    std::string payload;
+    if (!base64_decode(s.substr(end + 1), payload) || !id || payload.size() > 4096) return false;
     if (!utf8_valid(payload)) return false;
     f = {"CMD", static_cast<uint32_t>(id), payload}; return true;
 }

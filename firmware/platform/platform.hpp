@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 namespace miku {
+class FileStore;
 struct Platform {
     virtual ~Platform() = default;
     virtual uint64_t milliseconds() const = 0;
@@ -17,5 +18,8 @@ struct Platform {
     virtual std::string model() const = 0;
     virtual void write(const std::string& bytes) = 0;
     virtual void reboot() = 0;
+    virtual FileStore* files() { return nullptr; }
+    virtual uint32_t storage_nonce() const { return 1; }
+    virtual void cooperate() {}
 };
 }

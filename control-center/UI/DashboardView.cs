@@ -22,7 +22,7 @@ public sealed class DashboardView : UserControl
         var hint = new Label { Dock = DockStyle.Top, Height = 28, Text = "Свободная внутренняя память · последние 120 измерений", ForeColor = Theme.Muted, BackColor = Color.Transparent, Font = new Font("Segoe UI", 9) };
         history.Controls.Add(chart); history.Controls.Add(hint); history.Controls.Add(title); bottom.Controls.Add(history, 0, 0);
         var shortcuts = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1 };
-        var links = new[] { ("01", "Терминал", "Команды и общение с MikuOS", 1), ("02", "Медиа", "Видео и ASCII-кадры", 6), ("03", "Настройки", "Подключение и параметры платы", 7) };
+        var links = new[] { ("01", "Терминал", "Команды и общение с MikuOS", 1), ("02", "Медиа", "Видео и ASCII-кадры", 6), ("03", "Файлы", "Папки и редактор во Flash ESP32", 8) };
         for (int i = 0; i < links.Length; i++)
         {
             shortcuts.RowStyles.Add(new(SizeType.Percent, 100f / 3)); var link = links[i];
